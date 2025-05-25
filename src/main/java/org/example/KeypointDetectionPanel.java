@@ -21,6 +21,9 @@ class KeypointDetectionPanel extends JPanel {
     private JButton harrisBtn, siftBtn, surfBtn, fastBtn;
     private JLabel imageLabel;
     private Mat currentImage;
+    private double scaleFactor = 1.0;
+    private JScrollPane scrollPane;
+    private JSlider zoomSlider;
 
     public KeypointDetectionPanel() {
         setLayout(new BorderLayout());
@@ -51,6 +54,25 @@ class KeypointDetectionPanel extends JPanel {
         siftBtn.addActionListener(e -> detectSIFT());
         surfBtn.addActionListener(e -> detectSURF());
         fastBtn.addActionListener(e -> detectFAST());
+
+        // Настройка скролл-панели
+        scrollPane = new JScrollPane(imageLabel);
+        scrollPane.setPreferredSize(new Dimension(800, 600));
+        add(scrollPane, BorderLayout.CENTER);
+
+        // Панель управления масштабом
+        JPanel controlPanel = new JPanel();
+        zoomSlider = new JSlider(10, 200, 100);
+        zoomSlider.addChangeListener(e -> {
+            scaleFactor = zoomSlider.getValue() / 100.0;
+            if (currentImage != null) {
+                displayImage(currentImage);
+            }
+        });
+
+        controlPanel.add(new JLabel("Масштаб:"));
+        controlPanel.add(zoomSlider);
+        add(controlPanel, BorderLayout.SOUTH);
     }
 
     private void loadImage() {
@@ -142,7 +164,18 @@ class KeypointDetectionPanel extends JPanel {
 
     private void displayImage(Mat mat) {
         BufferedImage image = matToBufferedImage(mat);
-        imageLabel.setIcon(new ImageIcon(image));
+
+        // Создаем масштабируемую иконку
+        ImageIcon icon = new ImageIcon(image);
+        Image scaledImage = icon.getImage().getScaledInstance(
+                (int)(image.getWidth() * scaleFactor),
+                (int)(image.getHeight() * scaleFactor),
+                Image.SCALE_SMOOTH
+        );
+
+        imageLabel.setIcon(new ImageIcon(scaledImage));
+        imageLabel.revalidate();
+        imageLabel.repaint();
     }
 
     private BufferedImage matToBufferedImage(Mat mat) {
