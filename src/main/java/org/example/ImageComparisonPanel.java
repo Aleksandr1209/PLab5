@@ -1,10 +1,8 @@
 package org.example;
 
-import org.opencv.core.DMatch;
-import org.opencv.core.Mat;
-import org.opencv.core.MatOfDMatch;
-import org.opencv.core.MatOfKeyPoint;
+import org.opencv.core.*;
 import org.opencv.features2d.BFMatcher;
+import org.opencv.features2d.Features2d;
 import org.opencv.features2d.SIFT;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
@@ -15,159 +13,198 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
-class ImageComparisonPanel extends JPanel {
-    private JButton loadImagesBtn;
-    private JButton compareBtn;
-    private JLabel resultLabel;
-    private List<Mat> loadedImages = new ArrayList<>();
+public class ImageComparisonPanel extends JPanel {
+        private JLabel resultLabel;
+        private List<Mat> loadedImages = new ArrayList<>();
+        private JScrollPane scrollPane;
 
-    public ImageComparisonPanel() {
-        setLayout(new BorderLayout());
+        public ImageComparisonPanel() {
+            setLayout(new BorderLayout());
 
-        JPanel buttonPanel = new JPanel();
-        loadImagesBtn = new JButton("Load Images (3-10)");
-        compareBtn = new JButton("Compare");
+            JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+            JButton loadImagesBtn = new JButton("Load Images (3-10)");
+            JButton compareBtn = new JButton("Compare");
 
-        buttonPanel.add(loadImagesBtn);
-        buttonPanel.add(compareBtn);
+            buttonPanel.add(loadImagesBtn);
+            buttonPanel.add(compareBtn);
+            add(buttonPanel, BorderLayout.NORTH);
 
-        add(buttonPanel, BorderLayout.NORTH);
+            resultLabel = new JLabel();
+            resultLabel.setHorizontalAlignment(JLabel.CENTER);
+            scrollPane = new JScrollPane(resultLabel);
+            scrollPane.setPreferredSize(new Dimension(800, 600));
+            add(scrollPane, BorderLayout.CENTER);
 
-        resultLabel = new JLabel("Results will be shown here");
-        add(new JScrollPane(resultLabel), BorderLayout.CENTER);
+            loadImagesBtn.addActionListener(e -> loadImages());
+            compareBtn.addActionListener(e -> compareImages());
+        }
 
-        loadImagesBtn.addActionListener(e -> loadImages());
-        compareBtn.addActionListener(e -> compareImages());
-    }
+        private void loadImages() {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setMultiSelectionEnabled(true);
 
-    private void loadImages() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setMultiSelectionEnabled(true);
+            if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+                loadedImages.clear();
+                File[] files = fileChooser.getSelectedFiles();
 
-        if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            loadedImages.clear();
-            File[] files = fileChooser.getSelectedFiles();
+                if (files.length < 3 || files.length > 10) {
+                    JOptionPane.showMessageDialog(this,
+                            "Please select between 3 and 10 images.",
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
 
-            if (files.length < 3 || files.length > 10) {
-                JOptionPane.showMessageDialog(this, "Please select between 3 and 10 images.");
+                for (File file : files) {
+                    Mat img = Imgcodecs.imread(file.getAbsolutePath());
+                    if (!img.empty()) {
+                        loadedImages.add(img);
+                    }
+                }
+
+                resultLabel.setText("Loaded " + loadedImages.size() + " images.");
+                resultLabel.setIcon(null);
+            }
+        }
+
+        private void compareImages() {
+            if (loadedImages.size() < 3) {
+                JOptionPane.showMessageDialog(this,
+                        "Please load at least 3 images first.",
+                        "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
-            for (File file : files) {
-                Mat img = Imgcodecs.imread(file.getAbsolutePath());
-                if (!img.empty()) {
-                    loadedImages.add(img);
+            SIFT sift = SIFT.create();
+            List<MatOfKeyPoint> keypointsList = new ArrayList<>();
+            List<Mat> descriptorsList = new ArrayList<>();
+
+            for (Mat img : loadedImages) {
+                Mat gray = new Mat();
+                Imgproc.cvtColor(img, gray, Imgproc.COLOR_BGR2GRAY);
+
+                MatOfKeyPoint keypoints = new MatOfKeyPoint();
+                Mat descriptors = new Mat();
+                sift.detectAndCompute(gray, new Mat(), keypoints, descriptors);
+
+                keypointsList.add(keypoints);
+                descriptorsList.add(descriptors);
+            }
+
+            BFMatcher matcher = BFMatcher.create(BFMatcher.BRUTEFORCE);
+            double minDistance = Double.MAX_VALUE;
+            int bestIdx1 = -1, bestIdx2 = -1;
+
+            for (int i = 0; i < descriptorsList.size(); i++) {
+                for (int j = i + 1; j < descriptorsList.size(); j++) {
+                    MatOfDMatch matches = new MatOfDMatch();
+                    matcher.match(descriptorsList.get(i), descriptorsList.get(j), matches);
+
+                    double totalDistance = 0;
+                    List<DMatch> matchesList = matches.toList();
+                    for (DMatch match : matchesList) {
+                        totalDistance += match.distance;
+                    }
+                    double avgDistance = totalDistance / matchesList.size();
+
+                    if (avgDistance < minDistance) {
+                        minDistance = avgDistance;
+                        bestIdx1 = i;
+                        bestIdx2 = j;
+                    }
                 }
             }
 
-            resultLabel.setText("Loaded " + loadedImages.size() + " images.");
-        }
-    }
-
-    private void compareImages() {
-        if (loadedImages.size() < 3) {
-            JOptionPane.showMessageDialog(this, "Please load at least 3 images first.");
-            return;
-        }
-
-        // Используем SIFT для извлечения признаков
-        SIFT sift = SIFT.create();
-        List<MatOfKeyPoint> keypoints = new ArrayList<>();
-        List<Mat> descriptors = new ArrayList<>();
-
-        for (Mat img : loadedImages) {
-            Mat gray = new Mat();
-            Imgproc.cvtColor(img, gray, Imgproc.COLOR_BGR2GRAY);
-
-            MatOfKeyPoint kp = new MatOfKeyPoint();
-            Mat desc = new Mat();
-            sift.detectAndCompute(gray, new Mat(), kp, desc);
-
-            keypoints.add(kp);
-            descriptors.add(desc);
-        }
-
-        // Сравниваем все изображения попарно
-        double maxSimilarity = -1;
-        int bestPair1 = -1, bestPair2 = -1;
-
-        BFMatcher matcher = BFMatcher.create(BFMatcher.BRUTEFORCE, true);
-
-        for (int i = 0; i < descriptors.size(); i++) {
-            for (int j = i + 1; j < descriptors.size(); j++) {
-                MatOfDMatch matches = new MatOfDMatch();
-                matcher.match(descriptors.get(i), descriptors.get(j), matches);
-
-                // Фильтрация хороших совпадений
-                List<DMatch> matchesList = matches.toList();
-                matchesList.sort((a, b) -> Float.compare(a.distance, b.distance));
-
-                double similarity = 0;
-                int goodMatches = 0;
-                for (int k = 0; k < Math.min(50, matchesList.size()); k++) {
-                    similarity += matchesList.get(k).distance;
-                    goodMatches++;
-                }
-
-                similarity = goodMatches > 0 ? similarity / goodMatches : Double.MAX_VALUE;
-
-                if (maxSimilarity == -1 || similarity < maxSimilarity) {
-                    maxSimilarity = similarity;
-                    bestPair1 = i;
-                    bestPair2 = j;
-                }
+            if (bestIdx1 != -1 && bestIdx2 != -1) {
+                displayComparisonResult(loadedImages.get(bestIdx1), loadedImages.get(bestIdx2),
+                        keypointsList.get(bestIdx1), keypointsList.get(bestIdx2));
             }
         }
 
-        // Показываем результаты
-        if (bestPair1 != -1 && bestPair2 != -1) {
-            resultLabel.setText(String.format("Most similar images: %d and %d (similarity: %.2f)",
-                    bestPair1 + 1, bestPair2 + 1, maxSimilarity));
+    private void displayComparisonResult(Mat img1, Mat img2,
+                                         MatOfKeyPoint kp1, MatOfKeyPoint kp2) {
+        try {
+            Mat rgbImg1 = new Mat();
+            Mat rgbImg2 = new Mat();
+            Imgproc.cvtColor(img1, rgbImg1, Imgproc.COLOR_BGR2RGB);
+            Imgproc.cvtColor(img2, rgbImg2, Imgproc.COLOR_BGR2RGB);
 
-            // Показываем изображения
-            Mat img1 = loadedImages.get(bestPair1);
-            Mat img2 = loadedImages.get(bestPair2);
+            SIFT sift = SIFT.create();
+            Mat descriptors1 = new Mat();
+            Mat descriptors2 = new Mat();
+            sift.compute(rgbImg1, kp1, descriptors1);
+            sift.compute(rgbImg2, kp2, descriptors2);
 
-            // Создаем мозаику из двух изображений
-            Mat combined = new Mat(Math.max(img1.rows(), img2.rows()), img1.cols() + img2.cols(), img1.type());
+            BFMatcher matcher = BFMatcher.create();
+            MatOfDMatch matches = new MatOfDMatch();
+            matcher.match(descriptors1, descriptors2, matches);
 
-            Mat left = combined.submat(0, img1.rows(), 0, img1.cols());
-            img1.copyTo(left);
+            List<DMatch> matchesList = matches.toList();
+            matchesList.sort(Comparator.comparingDouble(d -> d.distance));
+            List<DMatch> goodMatches = matchesList.subList(0, Math.min(50, matchesList.size()));
 
-            Mat right = combined.submat(0, img2.rows(), img1.cols(), img1.cols() + img2.cols());
-            img2.copyTo(right);
+            Mat outputImg = new Mat();
+            Features2d.drawMatches(
+                    rgbImg1, kp1, rgbImg2, kp2,
+                    new MatOfDMatch(goodMatches.toArray(new DMatch[0])),
+                    outputImg,
+                    new Scalar(0, 255, 0),
+                    new Scalar(255, 0, 0),
+                    new MatOfByte(),
+                    Features2d.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+            );
 
-            BufferedImage resultImage = matToBufferedImage(combined);
-            resultLabel.setIcon(new ImageIcon(resultImage));
-            resultLabel.setText("");
+            Mat resizedImg = new Mat();
+            double scale = calculateOptimalScale(outputImg.width(), outputImg.height(),
+                    scrollPane.getWidth(), scrollPane.getHeight());
+            Imgproc.resize(outputImg, resizedImg, new Size(), scale, scale, Imgproc.INTER_AREA);
+
+            resultLabel.setIcon(new ImageIcon(matToBufferedImage(resizedImg)));
+            resultLabel.setText(null);
+
+            rgbImg1.release();
+            rgbImg2.release();
+            descriptors1.release();
+            descriptors2.release();
+            outputImg.release();
+            resizedImg.release();
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this,
+                    "Error drawing matches: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
         }
     }
+
+        private double calculateOptimalScale(int imgWidth, int imgHeight,
+                                             int panelWidth, int panelHeight) {
+            double widthScale = (panelWidth * 0.9) / imgWidth;
+            double heightScale = (panelHeight * 0.9) / imgHeight;
+            return Math.min(widthScale, heightScale);
+        }
 
     private BufferedImage matToBufferedImage(Mat mat) {
-        // Определяем тип BufferedImage в зависимости от количества каналов в Mat
-        int type = BufferedImage.TYPE_BYTE_GRAY;
-        if (mat.channels() > 1) {
-            type = BufferedImage.TYPE_3BYTE_BGR;
-        }
+        int type = mat.channels() > 1 ? BufferedImage.TYPE_3BYTE_BGR : BufferedImage.TYPE_BYTE_GRAY;
 
-        // Получаем размеры изображения
-        int bufferSize = mat.channels() * mat.cols() * mat.rows();
-        byte[] buffer = new byte[bufferSize];
-
-        // Копируем данные из Mat в byte array
-        mat.get(0, 0, buffer);
-
-        // Создаем BufferedImage
         BufferedImage image = new BufferedImage(mat.cols(), mat.rows(), type);
 
-        // Получаем доступ к пикселям BufferedImage
-        final byte[] targetPixels = ((DataBufferByte) image.getRaster().getDataBuffer()).getData();
+        byte[] data = new byte[mat.cols() * mat.rows() * mat.channels()];
+        mat.get(0, 0, data);
 
-        // Копируем данные из buffer в targetPixels
-        System.arraycopy(buffer, 0, targetPixels, 0, buffer.length);
+        if (mat.channels() == 3) {
+            for (int i = 0; i < data.length; i += 3) {
+                byte temp = data[i];
+                data[i] = data[i + 2];
+                data[i + 2] = temp;
+            }
+        }
+
+        System.arraycopy(data, 0,
+                ((DataBufferByte) image.getRaster().getDataBuffer()).getData(),
+                0, data.length);
 
         return image;
     }
-}
+    }
